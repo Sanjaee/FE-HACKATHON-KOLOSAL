@@ -375,6 +375,9 @@ export function Chatbot() {
   const [imageError, setImageError] = React.useState<string | null>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   
+  // Image focus dialog
+  const [focusedImage, setFocusedImage] = React.useState<string | null>(null);
+  
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const messagesContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -455,7 +458,7 @@ export function Chatbot() {
       setIsAtBottom(true);
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 50);
+      }, 1);
     }
   }, [open]);
 
@@ -592,13 +595,13 @@ export function Chatbot() {
     }
   };
 
+  // Fungsi untuk menampilkan respon secara bertahap (lebih cepat dengan chunk-based)
   const display = async (text: string, messageIndex: number) => {
     setIsTyping(true);
-    let currentIndex = 0;
-    const chunkSize = 20;
+    const chunkSize = 10; // Render 10 karakter sekaligus untuk lebih cepat
     
-    while (currentIndex < text.length) {
-      const chunk = text.slice(currentIndex, currentIndex + chunkSize);
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.slice(i, i + chunkSize);
       setMessages((prevMessages) => {
         const newMessages = [...prevMessages];
         newMessages[messageIndex] = {
@@ -607,8 +610,16 @@ export function Chatbot() {
         };
         return newMessages;
       });
-      currentIndex += chunkSize;
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      
+      // Gunakan requestAnimationFrame untuk batch update yang lebih efisien
+      // Ini akan sync dengan browser refresh rate (~60fps) untuk performa optimal
+      if (i + chunkSize < text.length) {
+        await new Promise((resolve) => {
+          requestAnimationFrame(resolve);
+        });
+      }
+      
+      // Auto-scroll jika user di bottom
       if (checkIfAtBottom()) {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }
@@ -995,13 +1006,14 @@ export function Chatbot() {
                       : "bg-muted text-foreground"
                   )}
                 >
-                  {/* Show image if present */}
+                  {/* Show image if present - clickable to focus */}
                   {message.image && (
                     <div className="mb-2">
                       <img
                         src={message.image}
                         alt="Attached"
-                        className="max-w-full max-h-48 rounded-lg object-contain"
+                        className="max-w-full max-h-48 rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                        onClick={() => setFocusedImage(message.image!)}
                       />
                     </div>
                   )}
@@ -1036,7 +1048,8 @@ export function Chatbot() {
                 <img
                   src={imagePreview}
                   alt="Preview"
-                  className="h-20 w-20 object-cover rounded-lg border"
+                  className="h-20 w-20 object-cover rounded-lg border cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => setFocusedImage(imagePreview)}
                 />
                 <button
                   onClick={removeImage}
@@ -1102,6 +1115,22 @@ export function Chatbot() {
               </p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Focus Dialog */}
+      <Dialog open={!!focusedImage} onOpenChange={() => setFocusedImage(null)}>
+        <DialogContent className="max-w-[95vw] w-fit max-h-[95vh]">
+          <DialogTitle className="sr-only">Image Preview</DialogTitle>
+          {focusedImage && (
+            <div className="relative flex items-center justify-center">
+              <img
+                src={focusedImage}
+                alt="Focused"
+                className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg"
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>
