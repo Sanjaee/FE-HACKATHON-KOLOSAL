@@ -111,9 +111,6 @@ export default function DataMap({ full }: MapProps) {
     try {
       setLoading(true);
       const response = await apiService.getAllRentals({
-        lat: (bounds.north + bounds.south) / 2,
-        lng: (bounds.east + bounds.west) / 2,
-        radius: 10,
         search: query || undefined,
         limit: 50,
       });
