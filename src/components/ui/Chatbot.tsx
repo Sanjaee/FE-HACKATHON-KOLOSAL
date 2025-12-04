@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { WorkspaceManager } from "@/components/ui/WorkspaceManager";
 
 type Message = {
   role: "user" | "assistant";
@@ -366,8 +367,8 @@ export function Chatbot() {
   // Chat History for Agent
   const [chatHistory, setChatHistory] = React.useState<HistoryItem[]>([]);
   
-  // Mode: chat or agent
-  const [mode, setMode] = React.useState<"chat" | "agent">("agent");
+  // Mode: chat, agent, detect, or ocr
+  const [mode, setMode] = React.useState<"chat" | "agent" | "detect" | "ocr">("chat");
   
   // Image upload
   const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
@@ -653,9 +654,9 @@ export function Chatbot() {
     try {
       let fullContent = "";
 
-      // If image is present, use Object Detection API first
-      if (imageToSend) {
-        // Strip data URL prefix if present - API needs raw base64
+      // Handle different modes
+      if (mode === "detect" && imageToSend) {
+        // Object Detection mode
         let base64Image = imageToSend;
         if (imageToSend.includes(",")) {
           base64Image = imageToSend.split(",")[1];
@@ -675,7 +676,6 @@ export function Chatbot() {
 
         const detectData = await detectResponse.json();
         
-        // Store annotated image if available
         let annotatedImage: string | undefined;
         if (detectData.annotated_image) {
           annotatedImage = `data:image/png;base64,${detectData.annotated_image}`;
@@ -684,7 +684,6 @@ export function Chatbot() {
         if (detectData.error) {
           fullContent = `**Error:** ${detectData.detail || detectData.error}`;
         } else if (detectData.results && detectData.results.length > 0) {
-          // Simple summary - just count of objects
           const objectCounts: Record<string, number> = {};
           detectData.results.forEach((result: { name: string }) => {
             objectCounts[result.name] = (objectCounts[result.name] || 0) + 1;
@@ -700,7 +699,6 @@ export function Chatbot() {
           }
         }
 
-        // Add assistant message with annotated image
         const assistantMessage: Message = {
           role: "assistant",
           content: fullContent,
@@ -709,7 +707,62 @@ export function Chatbot() {
 
         setMessages((prev) => [...prev, assistantMessage]);
         setLoading(false);
-        return; // Early return since we already handled the response
+        return;
+      } else if (mode === "ocr" && imageToSend) {
+        // OCR mode - Extract text from image using multipart/form-data
+        const ocrResponse = await fetch("/api/ocr?action=form", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_data: imageToSend, // Send full data URL including prefix
+            language: "auto",
+            invoice: false,
+          }),
+        });
+
+        const ocrData = await ocrResponse.json();
+        console.log("OCR Response:", ocrData);
+        
+        if (ocrData.error) {
+          const errorDetail = ocrData.details?.message || ocrData.details?.error || ocrData.error;
+          fullContent = `**Error:** ${errorDetail}`;
+        } else if (ocrData.text || ocrData.extracted_text || ocrData.result || ocrData.content) {
+          const extractedText = ocrData.text || ocrData.extracted_text || ocrData.result || ocrData.content || "";
+          fullContent = `📝 **Extracted Text:**\n\n${extractedText}`;
+        } else if (ocrData.blocks || ocrData.lines || ocrData.paragraphs) {
+          // Handle structured OCR response
+          const items = ocrData.blocks || ocrData.lines || ocrData.paragraphs || [];
+          const text = items.map((b: { text?: string; content?: string; value?: string }) => 
+            b.text || b.content || b.value || ""
+          ).join("\n");
+          fullContent = `📝 **Extracted Text:**\n\n${text || "No text found in image."}`;
+        } else if (typeof ocrData === "object" && Object.keys(ocrData).length > 0) {
+          // Try to extract any text-like field from the response
+          const possibleTextFields = ["text", "content", "result", "extracted_text", "ocr_text", "data"];
+          let foundText = "";
+          for (const field of possibleTextFields) {
+            if (ocrData[field] && typeof ocrData[field] === "string") {
+              foundText = ocrData[field];
+              break;
+            }
+          }
+          if (foundText) {
+            fullContent = `📝 **Extracted Text:**\n\n${foundText}`;
+          } else {
+            fullContent = `📝 **OCR Result:**\n\n\`\`\`json\n${JSON.stringify(ocrData, null, 2)}\n\`\`\``;
+          }
+        } else {
+          fullContent = `📝 No text found in the image.`;
+        }
+
+        const assistantMessage: Message = {
+          role: "assistant",
+          content: fullContent,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        setLoading(false);
+        return;
       } else if (mode === "agent" && selectedWorkspace) {
         // Use Agent API
         const response = await fetch("/api/agent?action=generate", {
@@ -833,12 +886,17 @@ export function Chatbot() {
                 <MessageCircle className="h-5 w-5" />
                 AI Agent
               </DialogTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <WorkspaceManager
+                  selectedWorkspace={selectedWorkspace}
+                  onWorkspaceSelect={setSelectedWorkspace}
+                />
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setSettingsOpen(!settingsOpen)}
                   className="h-8 w-8"
+                  title="Settings"
                 >
                   <Settings2 className="h-4 w-4" />
                 </Button>
@@ -847,6 +905,7 @@ export function Chatbot() {
                   size="icon"
                   onClick={clearChat}
                   className="h-8 w-8"
+                  title="Clear chat"
                 >
                   <RefreshCw className="h-4 w-4" />
                 </Button>
@@ -859,13 +918,15 @@ export function Chatbot() {
                 {/* Mode Selection */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground w-16">Mode:</span>
-                  <Select value={mode} onValueChange={(v: "chat" | "agent") => setMode(v)}>
+                  <Select value={mode} onValueChange={(v: "chat" | "agent" | "detect" | "ocr") => setMode(v)}>
                     <SelectTrigger className="flex-1 h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="agent">Agent</SelectItem>
-                      <SelectItem value="chat">Chat</SelectItem>
+                      <SelectItem value="chat">💬 Chat</SelectItem>
+                      <SelectItem value="agent">🤖 Agent</SelectItem>
+                      <SelectItem value="detect">🔍 Object Detection</SelectItem>
+                      <SelectItem value="ocr">📝 OCR (Text Extract)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1091,7 +1152,15 @@ export function Chatbot() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder={selectedImage ? "Describe what to detect..." : (mode === "agent" ? "Ask the agent..." : "Type your message...")}
+                placeholder={
+                  mode === "detect" 
+                    ? "Objects to detect (comma-separated)..." 
+                    : mode === "ocr" 
+                      ? "Upload image to extract text" 
+                      : mode === "agent" 
+                        ? "Ask the agent..." 
+                        : "Type your message..."
+                }
                 disabled={loading || isTyping}
                 className="flex-1"
               />
@@ -1109,9 +1178,29 @@ export function Chatbot() {
                 ⚠️ Please select or create a workspace first
               </p>
             )}
-            {selectedImage && (
+            {mode === "detect" && !selectedImage && (
               <p className="text-xs text-muted-foreground">
-                📷 Image attached. Add prompts (comma-separated) to detect specific objects, or leave empty for auto-detection.
+                🔍 Upload an image to detect objects
+              </p>
+            )}
+            {mode === "ocr" && !selectedImage && (
+              <p className="text-xs text-muted-foreground">
+                📝 Upload an image to extract text (OCR)
+              </p>
+            )}
+            {selectedImage && mode === "detect" && (
+              <p className="text-xs text-muted-foreground">
+                📷 Image attached. Add object names (comma-separated) or leave empty for auto-detection.
+              </p>
+            )}
+            {selectedImage && mode === "ocr" && (
+              <p className="text-xs text-muted-foreground">
+                📷 Image attached. Click send to extract text.
+              </p>
+            )}
+            {selectedImage && (mode === "chat" || mode === "agent") && (
+              <p className="text-xs text-muted-foreground">
+                📷 Image attached. Switch to Detect or OCR mode to analyze the image.
               </p>
             )}
           </div>

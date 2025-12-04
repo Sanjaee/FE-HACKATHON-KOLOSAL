@@ -5,36 +5,6 @@ const KOLOSAL_API_BASE = "https://api.kolosal.ai/v1/workspaces";
 const KOLOSAL_API_KEY =
   "Bearer kol_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiZDE0OWZkY2MtMTRhOS00MzYwLWI3YWQtY2IxMzhmODk5MGYwIiwia2V5X2lkIjoiYzBkMDk5ZDYtZTRhYy00NDY2LWExMTUtNjA5NTViNTM3MGI3Iiwia2V5X25hbWUiOiJ0ZXN0dHR0IiwiZW1haWwiOiJhZnJpemFhaG1hZDE4QGdtYWlsLmNvbSIsInJhdGVfbGltaXRfcnBzIjpudWxsLCJtYXhfY3JlZGl0X3VzZSI6MTAsImNyZWF0ZWRfYXQiOjE3NjQ3NzQ1OTMsImV4cGlyZXNfYXQiOjE3OTYzMTA1OTMsImlhdCI6MTc2NDc3NDU5M30.DqjicnHVHodcF40vercq4lyerZAG13n6NS5kGCFhIqs";
 
-type WorkspaceSettings = {
-  agent_timeout_seconds?: number;
-  allowed_file_types?: string[];
-  auto_save?: boolean;
-  custom_config?: Record<string, unknown>;
-  max_file_size_mb?: number;
-  python_environment?: string | null;
-  shared_resources?: boolean;
-};
-
-type CreateWorkspaceRequest = {
-  name: string;
-  description?: string | null;
-  workspace_type?: string;
-  settings?: WorkspaceSettings;
-  github_repo?: {
-    repo_url: string;
-    branch?: string | null;
-    oauth_token?: string | null;
-  };
-};
-
-type UpdateWorkspaceRequest = {
-  name?: string | null;
-  description?: string | null;
-  is_active?: boolean | null;
-  workspace_type?: string;
-  settings?: WorkspaceSettings;
-};
-
 // Helper function to safely parse JSON response
 async function safeJsonParse(body: { text: () => Promise<string> }) {
   const text = await body.text();
@@ -49,24 +19,66 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const { action, workspace_id } = req.query;
+  const { action, workspace_id, category_id, feature_id } = req.query;
 
   try {
     switch (action) {
+      // Workspace actions
       case "list":
         return handleList(req, res);
       case "create":
         return handleCreate(req, res);
-      case "stats":
-        return handleStats(req, res);
       case "get":
         return handleGet(req, res, workspace_id as string);
       case "delete":
         return handleDelete(req, res, workspace_id as string);
       case "update":
         return handleUpdate(req, res, workspace_id as string);
+      case "stats":
+        return handleStats(req, res);
       case "status":
         return handleStatus(req, res, workspace_id as string);
+      
+      // Order actions
+      case "order":
+        return handleOrder(req, res);
+      case "order-update":
+        return handleOrderUpdate(req, res);
+      case "order-stats":
+        return handleOrderStats(req, res);
+      
+      // Category actions
+      case "categories":
+        return handleCategories(req, res, workspace_id as string);
+      case "category-create":
+        return handleCategoryCreate(req, res, workspace_id as string);
+      case "category-get":
+        return handleCategoryGet(req, res, workspace_id as string, category_id as string);
+      case "category-delete":
+        return handleCategoryDelete(req, res, workspace_id as string, category_id as string);
+      case "category-update":
+        return handleCategoryUpdate(req, res, workspace_id as string, category_id as string);
+      case "category-order":
+        return handleCategoryOrder(req, res, workspace_id as string);
+      case "category-order-update":
+        return handleCategoryOrderUpdate(req, res, workspace_id as string);
+      
+      // Feature actions
+      case "features":
+        return handleFeatures(req, res, workspace_id as string, category_id as string);
+      case "feature-create":
+        return handleFeatureCreate(req, res, workspace_id as string, category_id as string);
+      case "feature-get":
+        return handleFeatureGet(req, res, workspace_id as string, category_id as string, feature_id as string);
+      case "feature-delete":
+        return handleFeatureDelete(req, res, workspace_id as string, category_id as string, feature_id as string);
+      case "feature-update":
+        return handleFeatureUpdate(req, res, workspace_id as string, category_id as string, feature_id as string);
+      case "feature-order":
+        return handleFeatureOrder(req, res, workspace_id as string, category_id as string);
+      case "feature-order-update":
+        return handleFeatureOrderUpdate(req, res, workspace_id as string, category_id as string);
+      
       default:
         return res.status(400).json({ error: "Invalid action" });
     }
@@ -79,287 +91,289 @@ export default async function handler(
   }
 }
 
+// ==================== WORKSPACE HANDLERS ====================
+
 async function handleList(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  try {
-    const { statusCode, body } = await request(KOLOSAL_API_BASE, {
-      method: "GET",
-      headers: {
-        Authorization: KOLOSAL_API_KEY,
-      },
-    });
-
-    const responseData = await safeJsonParse(body);
-
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to list workspaces",
-        details: responseData,
-      });
-    }
-
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("List error:", error);
-    return res.status(500).json({
-      error: "Failed to list workspaces",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+  const { statusCode, body } = await request(KOLOSAL_API_BASE, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
 async function handleCreate(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const data: CreateWorkspaceRequest = req.body;
+  const { statusCode, body } = await request(KOLOSAL_API_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify(req.body),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 || statusCode === 201 ? 200 : statusCode).json(data);
+}
 
-  if (!data.name) {
-    return res.status(400).json({ error: "Name is required" });
-  }
+async function handleGet(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
 
-  try {
-    const { statusCode, body } = await request(KOLOSAL_API_BASE, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: KOLOSAL_API_KEY,
-      },
-      body: JSON.stringify({
-        name: data.name,
-        description: data.description || null,
-        workspace_type: data.workspace_type || "personal",
-        settings: data.settings || {},
-      }),
-    });
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
 
-    const responseData = await safeJsonParse(body);
+async function handleDelete(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "DELETE") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
 
-    if (statusCode !== 200 && statusCode !== 201) {
-      return res.status(statusCode).json({
-        error: "Failed to create workspace",
-        details: responseData,
-      });
-    }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}`, {
+    method: "DELETE",
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
 
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Create error:", error);
-    return res.status(500).json({
-      error: "Failed to create workspace",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+async function handleUpdate(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "PATCH") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify(req.body),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
 async function handleStats(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  try {
-    const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/stats`, {
-      method: "GET",
-      headers: {
-        Authorization: KOLOSAL_API_KEY,
-      },
-    });
-
-    const responseData = await safeJsonParse(body);
-
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to get stats",
-        details: responseData,
-      });
-    }
-
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Stats error:", error);
-    return res.status(500).json({
-      error: "Failed to get stats",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/stats`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
-async function handleGet(
-  req: NextApiRequest,
-  res: NextApiResponse,
-  workspaceId: string
-) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+async function handleStatus(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
 
-  if (!workspaceId) {
-    return res.status(400).json({ error: "Workspace ID is required" });
-  }
-
-  try {
-    const { statusCode, body } = await request(
-      `${KOLOSAL_API_BASE}/${workspaceId}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: KOLOSAL_API_KEY,
-        },
-      }
-    );
-
-    const responseData = await safeJsonParse(body);
-
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to get workspace",
-        details: responseData,
-      });
-    }
-
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Get error:", error);
-    return res.status(500).json({
-      error: "Failed to get workspace",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/status`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
-async function handleDelete(
-  req: NextApiRequest,
-  res: NextApiResponse,
-  workspaceId: string
-) {
-  if (req.method !== "DELETE") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+// ==================== ORDER HANDLERS ====================
 
-  if (!workspaceId) {
-    return res.status(400).json({ error: "Workspace ID is required" });
-  }
+async function handleOrder(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  try {
-    const { statusCode, body } = await request(
-      `${KOLOSAL_API_BASE}/${workspaceId}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: KOLOSAL_API_KEY,
-        },
-      }
-    );
-
-    const responseData = await safeJsonParse(body);
-
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to delete workspace",
-        details: responseData,
-      });
-    }
-
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Delete error:", error);
-    return res.status(500).json({
-      error: "Failed to delete workspace",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/order`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
-async function handleUpdate(
-  req: NextApiRequest,
-  res: NextApiResponse,
-  workspaceId: string
-) {
-  if (req.method !== "PATCH") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+async function handleOrderUpdate(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "PUT") return res.status(405).json({ error: "Method not allowed" });
 
-  if (!workspaceId) {
-    return res.status(400).json({ error: "Workspace ID is required" });
-  }
-
-  const data: UpdateWorkspaceRequest = req.body;
-
-  try {
-    const { statusCode, body } = await request(
-      `${KOLOSAL_API_BASE}/${workspaceId}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: KOLOSAL_API_KEY,
-        },
-        body: JSON.stringify(data),
-      }
-    );
-
-    const responseData = await safeJsonParse(body);
-
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to update workspace",
-        details: responseData,
-      });
-    }
-
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Update error:", error);
-    return res.status(500).json({
-      error: "Failed to update workspace",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/order`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify(req.body),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
 
-async function handleStatus(
-  req: NextApiRequest,
-  res: NextApiResponse,
-  workspaceId: string
-) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+async function handleOrderStats(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  if (!workspaceId) {
-    return res.status(400).json({ error: "Workspace ID is required" });
-  }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/order/stats`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
 
-  try {
-    const { statusCode, body } = await request(
-      `${KOLOSAL_API_BASE}/${workspaceId}/status`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: KOLOSAL_API_KEY,
-        },
-      }
-    );
+// ==================== CATEGORY HANDLERS ====================
 
-    const responseData = await safeJsonParse(body);
+async function handleCategories(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
 
-    if (statusCode !== 200) {
-      return res.status(statusCode).json({
-        error: "Failed to get workspace status",
-        details: responseData,
-      });
-    }
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
 
-    return res.status(200).json(responseData);
-  } catch (error) {
-    console.error("Status error:", error);
-    return res.status(500).json({
-      error: "Failed to get workspace status",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
+async function handleCategoryCreate(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify({ ...req.body, workspace_id: workspaceId }),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 || statusCode === 201 ? 200 : statusCode).json(data);
+}
+
+async function handleCategoryGet(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleCategoryDelete(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "DELETE") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}`, {
+    method: "DELETE",
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleCategoryUpdate(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "PATCH") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify(req.body),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleCategoryOrder(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/order`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleCategoryOrderUpdate(req: NextApiRequest, res: NextApiResponse, workspaceId: string) {
+  if (req.method !== "PUT") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId) return res.status(400).json({ error: "Workspace ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/order`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify({ ...req.body, workspace_id: workspaceId }),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+// ==================== FEATURE HANDLERS ====================
+
+async function handleFeatures(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureCreate(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify({ ...req.body, category_id: categoryId }),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 || statusCode === 201 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureGet(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string, featureId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId || !featureId) return res.status(400).json({ error: "All IDs required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features/${featureId}`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureDelete(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string, featureId: string) {
+  if (req.method !== "DELETE") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId || !featureId) return res.status(400).json({ error: "All IDs required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features/${featureId}`, {
+    method: "DELETE",
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureUpdate(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string, featureId: string) {
+  if (req.method !== "PATCH") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId || !featureId) return res.status(400).json({ error: "All IDs required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features/${featureId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify(req.body),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureOrder(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features/order`, {
+    headers: { Authorization: KOLOSAL_API_KEY },
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
+}
+
+async function handleFeatureOrderUpdate(req: NextApiRequest, res: NextApiResponse, workspaceId: string, categoryId: string) {
+  if (req.method !== "PUT") return res.status(405).json({ error: "Method not allowed" });
+  if (!workspaceId || !categoryId) return res.status(400).json({ error: "Workspace ID and Category ID required" });
+
+  const { statusCode, body } = await request(`${KOLOSAL_API_BASE}/${workspaceId}/categories/${categoryId}/features/order`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: KOLOSAL_API_KEY },
+    body: JSON.stringify({ ...req.body, category_id: categoryId }),
+  });
+  const data = await safeJsonParse(body);
+  return res.status(statusCode === 200 ? 200 : statusCode).json(data);
 }
