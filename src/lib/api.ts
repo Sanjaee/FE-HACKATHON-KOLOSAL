@@ -1,4 +1,5 @@
-// API client for authentication only
+// API client for authentication only (client-side wrapper)
+// This calls Next.js API routes which use undici on the server
 import type {
   RegisterRequest,
   LoginRequest,
@@ -15,14 +16,11 @@ import type {
   GoogleOAuthRequest,
 } from "@/types/auth";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://192.168.194.248:5000";
-
 class ApiClient {
-  private baseURL: string;
   private accessToken: string | null = null;
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
+  constructor() {
+    // No baseURL needed - we call Next.js API routes
   }
 
   // Set access token for authenticated requests
@@ -36,10 +34,11 @@ class ApiClient {
   }
 
   private async request<T>(
-    endpoint: string,
+    action: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
+    // Call Next.js API route which uses undici on the server
+    const url = `/api/auth/api?action=${action}`;
 
     const config: RequestInit = {
       headers: {
@@ -108,49 +107,49 @@ class ApiClient {
 
       return data;
     } catch (error) {
-      console.error(`API Error [${endpoint}]:`, error);
+      console.error(`API Error [${action}]:`, error);
       throw error;
     }
   }
 
   // Authentication endpoints
   async register(data: RegisterRequest): Promise<RegisterResponse> {
-    return this.request<RegisterResponse>("/api/v1/auth/register", {
+    return this.request<RegisterResponse>("register", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async login(data: LoginRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/v1/auth/login", {
+    return this.request<AuthResponse>("login", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async verifyOTP(data: OTPVerifyRequest): Promise<OTPVerifyResponse> {
-    return this.request<OTPVerifyResponse>("/api/v1/auth/verify-otp", {
+    return this.request<OTPVerifyResponse>("verify-otp", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async resendOTP(data: ResendOTPRequest): Promise<ResendOTPResponse> {
-    return this.request<ResendOTPResponse>("/api/v1/auth/resend-otp", {
+    return this.request<ResendOTPResponse>("resend-otp", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async googleOAuth(data: GoogleOAuthRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/v1/auth/google-oauth", {
+    return this.request<AuthResponse>("google-oauth", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async refreshToken(refreshToken: string): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/v1/auth/refresh-token", {
+    return this.request<AuthResponse>("refresh-token", {
       method: "POST",
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
@@ -159,39 +158,33 @@ class ApiClient {
   async requestResetPassword(
     data: ResetPasswordRequest
   ): Promise<ResetPasswordResponse> {
-    return this.request<ResetPasswordResponse>(
-      "/api/v1/auth/forgot-password",
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      }
-    );
+    return this.request<ResetPasswordResponse>("forgot-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async verifyResetPassword(
     data: VerifyResetPasswordRequest
   ): Promise<VerifyResetPasswordResponse> {
-    return this.request<VerifyResetPasswordResponse>(
-      "/api/v1/auth/verify-reset-password",
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-      }
-    );
+    return this.request<VerifyResetPasswordResponse>("verify-reset-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async resetPassword(data: {
     token: string;
     newPassword: string;
   }): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/v1/auth/reset-password", {
+    return this.request<AuthResponse>("reset-password", {
       method: "POST",
       body: JSON.stringify({ token: data.token, newPassword: data.newPassword }),
     });
   }
 
   async verifyEmail(token: string): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/v1/auth/verify-email", {
+    return this.request<AuthResponse>("verify-email", {
       method: "POST",
       body: JSON.stringify({ token }),
     });
@@ -199,7 +192,7 @@ class ApiClient {
 }
 
 // Create API client instance
-export const api = new ApiClient(API_BASE_URL);
+export const api = new ApiClient();
 
 // Token management utilities
 export class TokenManager {

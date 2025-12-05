@@ -1,7 +1,72 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+import { request } from "undici";
 import { api, TokenManager } from "../../../lib/api";
+import type { GoogleOAuthRequest, AuthResponse } from "@/types/auth";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://zoom.zacloth.com";
+
+// Helper function to call backend API directly with undici (for server-side)
+async function callBackendAPI<T>(
+  endpoint: string,
+  options: {
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+  } = {}
+): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+
+  try {
+    const { statusCode, body: responseBody } = await request(url, {
+      method: options.method || "GET",
+      headers,
+      body: options.body,
+    });
+
+    const text = await responseBody.text();
+    let responseData: any;
+    try {
+      responseData = JSON.parse(text);
+    } catch {
+      responseData = { error: text || "Unknown error" };
+    }
+
+    if (statusCode >= 400) {
+      const error = new Error(
+        responseData.message ||
+        responseData.error?.message ||
+        `HTTP ${statusCode}: Request failed`
+      ) as Error & {
+        response?: {
+          status: number;
+          data: unknown;
+        };
+      };
+      error.response = {
+        status: statusCode,
+        data: responseData,
+      };
+      throw error;
+    }
+
+    // Unwrap data if response is wrapped in { data: ... }
+    if (responseData.data) {
+      return responseData.data;
+    }
+
+    return responseData;
+  } catch (error) {
+    console.error(`Backend API Error [${endpoint}]:`, error);
+    throw error;
+  }
+}
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -77,10 +142,17 @@ export const authOptions: NextAuthOptions = {
             return null;
           }
 
-          const authResponse = await api.login({
-            email: credentials.email,
-            password: credentials.password,
-          });
+          // Call backend API directly with undici (server-side)
+          const authResponse = await callBackendAPI<AuthResponse>(
+            "/api/v1/auth/login",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                email: credentials.email,
+                password: credentials.password,
+              }),
+            }
+          );
 
           // Check if email verification is required
           if (authResponse.requires_verification && authResponse.verification_token) {
@@ -131,12 +203,19 @@ export const authOptions: NextAuthOptions = {
       // Handle Google OAuth
       if (account?.provider === "google") {
         try {
-          const authResponse = await api.googleOAuth({
-            email: user.email!,
-            full_name: user.name || user.email!.split("@")[0],
-            profile_photo: user.image || "",
-            google_id: account.providerAccountId,
-          });
+          // Call backend API directly with undici (server-side)
+          const authResponse = await callBackendAPI<AuthResponse>(
+            "/api/v1/auth/google-oauth",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                email: user.email!,
+                full_name: user.name || user.email!.split("@")[0],
+                profile_photo: user.image || "",
+                google_id: account.providerAccountId,
+              } as GoogleOAuthRequest),
+            }
+          );
 
           // Store the tokens in the user object for the JWT callback
           user.accessToken = authResponse.access_token;
@@ -274,7 +353,14 @@ async function refreshAccessToken(token: {
       };
     }
 
-    const refreshedTokens = await api.refreshToken(token.refreshToken);
+    // Call backend API directly with undici (server-side)
+    const refreshedTokens = await callBackendAPI<AuthResponse>(
+      "/api/v1/auth/refresh-token",
+      {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: token.refreshToken }),
+      }
+    );
 
     if (!refreshedTokens) {
       return {
